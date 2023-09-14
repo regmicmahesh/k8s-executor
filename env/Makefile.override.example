@@ -1,0 +1,8 @@
+export K8S_API_URL =
+
+export AWS_REGION =
+
+export AWS_PROFILE =
+
+export CLUSTER_NAME =
+
