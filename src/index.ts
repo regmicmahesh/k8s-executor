@@ -2,6 +2,7 @@ import WebSocket from "ws";
 import * as readline from "node:readline/promises";
 
 const K8S_API_URL = process.env.K8S_API_URL!;
+console.log(K8S_API_URL);
 const TOKEN = process.env.K8S_TOKEN!;
 
 const VALID_SUBPROTOCOLS = ["v4", "v3", "v2", "v1"].map(
