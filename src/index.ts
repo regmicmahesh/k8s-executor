@@ -1,60 +1,70 @@
-import WebSocket from "ws";
-import * as readline from "node:readline/promises";
+import WebSocket, { WebSocketServer } from "ws";
 
 const K8S_API_URL = process.env.K8S_API_URL!;
-console.log(K8S_API_URL);
 const TOKEN = process.env.K8S_TOKEN!;
 
+const PORT = parseInt(process.env.PORT!);
+
 const VALID_SUBPROTOCOLS = ["v4", "v3", "v2", "v1"].map(
-    (v) => `${v}.channel.k8s.io`
+  (v) => `${v}.channel.k8s.io`
 );
 
-const ws = new WebSocket(K8S_API_URL, VALID_SUBPROTOCOLS, {
-    rejectUnauthorized: false, // TODO: this is insecure. We need to add CA cert later.
-    headers: {
-        Authorization: `Bearer ${TOKEN}`,
-    },
+const wss = new WebSocketServer({ port: PORT });
+
+wss.on("listening", () => {
+  console.log(`[server] listening on port ${PORT}`);
 });
 
-const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-});
-
-// this buffer is used to prepend stdin messages with a message type byte.
 const stdinBuffer = Buffer.alloc(1);
 
-ws.on("open", () => {
-    console.log("Start sending commands...");
-});
+console.log(TOKEN);
 
-/*
- * The first byte of every message is a message type, which is a single byte.
- * The message types are:
- *   0: stdin (followed by 0 or more bytes of stdin data)
- *   1: stdout (followed by 0 or more bytes of stdout data)
- *   2: stderr (followed by 0 or more bytes of stderr data)
- */
-ws.on("message", (data: Buffer) => {
-    console.log("---");
+wss.on("connection", (ws: WebSocket) => {
+  let k8sws = new WebSocket(K8S_API_URL, VALID_SUBPROTOCOLS, {
+    rejectUnauthorized: false, // TODO: this is insecure. We need to add CA cert later.
+    headers: {
+      Authorization: `Bearer ${TOKEN}`,
+    },
+  });
+
+  k8sws.on("open", () => {
+    ws.send(JSON.stringify({ status: "connected" }));
+  });
+
+  ws.on("message", (data: Buffer) => {
+    const msg = data.toString("utf8").trim();
+    const json = JSON.parse(msg);
+
+    const cmd = json.stdin as string;
+    k8sws.send(Buffer.concat([stdinBuffer, Buffer.from(`${cmd}\n`)]));
+  });
+
+  k8sws.on("close", () => {
+    ws.send(JSON.stringify({ status: "disconnected" }));
+  });
+
+  k8sws.on("message", (data: Buffer) => {
     const newWay = data.subarray(1); // slicing of the message type byte.
     const msg = newWay.toString("utf8").trim();
-    if (msg == "#" || msg.length == 0) { 
-        console.log("---");
-        return;
+
+    const startingByte = data[0];
+    let wsOutput = "";
+
+    switch (startingByte) {
+      case 1:
+        wsOutput = JSON.stringify({ stdout: msg });
+        break;
+      case 2:
+        wsOutput = JSON.stringify({ stderr: msg });
+        break;
+      case 3:
+        wsOutput = JSON.stringify({ stdin: msg });
+        break;
+      default:
+        wsOutput = JSON.stringify({ status: "received unknown message" });
+        break;
     }
-    console.log(msg);
-    console.log("---");
-});
 
-ws.on("close", () => {
-    console.log("Connection closed");
-});
-
-ws.on("error", (err) => {
-    console.error("Something went wrong");
-});
-
-rl.on("line", (input) => {
-    ws.send(Buffer.concat([stdinBuffer, Buffer.from(`${input}\n`)]));
+    ws.send(wsOutput);
+  });
 });
