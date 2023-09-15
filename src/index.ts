@@ -1,70 +1,79 @@
 import WebSocket, { WebSocketServer } from "ws";
+import { KubernetesClient, PythonCompilerClient } from "./kubernetes";
 
-const K8S_API_URL = process.env.K8S_API_URL!;
+const API_URL = process.env.API_URL!;
 const TOKEN = process.env.K8S_TOKEN!;
 
 const PORT = parseInt(process.env.PORT!);
 
-const VALID_SUBPROTOCOLS = ["v4", "v3", "v2", "v1"].map(
-  (v) => `${v}.channel.k8s.io`
-);
-
-const wss = new WebSocketServer({ port: PORT });
+const wss = new WebSocketServer({ port: PORT, host: "0.0.0.0" });
 
 wss.on("listening", () => {
-  console.log(`[server] listening on port ${PORT}`);
+    console.log(`[server] listening on port ${PORT}`);
 });
 
 const stdinBuffer = Buffer.alloc(1);
 
-console.log(TOKEN);
+const kubernetesClient = new KubernetesClient({
+    url: API_URL,
+    token: TOKEN,
+});
 
-wss.on("connection", (ws: WebSocket) => {
-  let k8sws = new WebSocket(K8S_API_URL, VALID_SUBPROTOCOLS, {
-    rejectUnauthorized: false, // TODO: this is insecure. We need to add CA cert later.
-    headers: {
-      Authorization: `Bearer ${TOKEN}`,
-    },
-  });
+const client = new PythonCompilerClient(kubernetesClient);
+client.initialize();
 
-  k8sws.on("open", () => {
-    ws.send(JSON.stringify({ status: "connected" }));
-  });
+wss.on("connection", async (ws: WebSocket) => {
+    ws.send(JSON.stringify({ status: "connecting" }));
 
-  ws.on("message", (data: Buffer) => {
-    const msg = data.toString("utf8").trim();
-    const json = JSON.parse(msg);
+    const wsConn = await client.getWsConnection();
 
-    const cmd = json.stdin as string;
-    k8sws.send(Buffer.concat([stdinBuffer, Buffer.from(`${cmd}\n`)]));
-  });
+    const k8sws = wsConn.conn;
+    const name = wsConn.connId;
 
-  k8sws.on("close", () => {
-    ws.send(JSON.stringify({ status: "disconnected" }));
-  });
+    k8sws.on("open", () => {
+        ws.send(JSON.stringify({ status: "connected" }));
+    });
 
-  k8sws.on("message", (data: Buffer) => {
-    const newWay = data.subarray(1); // slicing of the message type byte.
-    const msg = newWay.toString("utf8").trim();
+    ws.on("close", async () => {
+        k8sws.close();
+        await client.cleanup(name);
+    });
 
-    const startingByte = data[0];
-    let wsOutput = "";
+    ws.on("message", (data: Buffer) => {
+        const msg = data.toString("utf8").trim();
+        const json = JSON.parse(msg);
 
-    switch (startingByte) {
-      case 1:
-        wsOutput = JSON.stringify({ stdout: msg });
-        break;
-      case 2:
-        wsOutput = JSON.stringify({ stderr: msg });
-        break;
-      case 3:
-        wsOutput = JSON.stringify({ stdin: msg });
-        break;
-      default:
-        wsOutput = JSON.stringify({ status: "received unknown message" });
-        break;
-    }
+        const cmd = json.stdin as string;
+        k8sws.send(Buffer.concat([stdinBuffer, Buffer.from(`${cmd}\n`)]));
+    });
 
-    ws.send(wsOutput);
-  });
+    k8sws.on("close", () => {
+        ws.send(JSON.stringify({ status: "disconnected" }));
+    });
+
+    k8sws.on("message", (data: Buffer) => {
+        console.log("MSG", data.toString("utf8"));
+        const newWay = data.subarray(1); // slicing of the message type byte.
+        const msg = newWay.toString("utf8").trim();
+
+        const startingByte = data[0];
+        let wsOutput = "";
+
+        switch (startingByte) {
+            case 1:
+                wsOutput = JSON.stringify({ stdout: msg });
+                break;
+            case 2:
+                wsOutput = JSON.stringify({ stderr: msg });
+                break;
+            case 3:
+                wsOutput = JSON.stringify({ stdin: msg });
+                break;
+            default:
+                wsOutput = JSON.stringify({ status: "received unknown message" });
+                break;
+        }
+
+        ws.send(wsOutput);
+    });
 });

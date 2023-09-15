@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: python-compiler
+  namespace: default
+  labels:
+    app: python-compiler
+spec:
+  selector:
+    matchLabels:
+      app: python-compiler
+  replicas: 5
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: python-compiler
+    spec:
+      containers:
+        - name: python-compiler
+          image: cgr.dev/chainguard/python:latest-dev
+          command: ["/bin/sleep"]
+          args: ["infinity"]
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: 100m
+              memory: 100Mi
+            limits:
+              cpu: 100m
+              memory: 100Mi
+      restartPolicy: Always

@@ -9,23 +9,10 @@ RUN npm install -g pnpm && \
 
 COPY . .
 
-RUN pnpm run build
-
-FROM node:20-alpine
-
-WORKDIR /app
-
-COPY --from=build /build/dist ./dist
-COPY package.json pnpm-lock.yaml ./
-
-RUN npm install -g pnpm && \
-    pnpm install --production && \
+RUN pnpm run build && \
     pnpm prune --prod
 
-CMD ["node", "dist/index.js"]
-
-
-FROM cgr.dev/chainguard/node:latest
+FROM cgr.dev/chainguard/node:latest as hardened-prod
 
 WORKDIR /app
 
@@ -34,4 +21,3 @@ COPY --from=build /build/node_modules ./node_modules
 COPY package.json pnpm-lock.yaml ./
 
 CMD ["dist/index.js"]
-
