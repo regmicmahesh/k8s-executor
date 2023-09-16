@@ -9,4 +9,7 @@ export K8S_TOKEN = $(shell aws eks get-token --cluster-name $(CLUSTER_NAME) --re
 export K8S_API_URL = $(API_URL)/api/v1/namespaces/$(NAMESPACE)/pods/$(POD_NAME)/exec?command=%2Fbin%2Fsh&container=nginx&stdin=true&stdout=true&stderr=true
 
 dev:
-	@yarn dev
+	@pnpm run dev
+
+build:
+	@pnpm run build

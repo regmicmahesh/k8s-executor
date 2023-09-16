@@ -1,21 +1,11 @@
 import https from "https";
-import yaml from "js-yaml";
 import axios, { AxiosInstance } from "axios";
-import { readFileSync } from "fs";
-import { join } from "path";
 import WebSocket from "ws";
 
 export type KubernetesClientConfig = {
     url: string;
     token: string;
 };
-
-const PYTHON_COMPILER_DEPLOYMENT = yaml.load(
-    readFileSync(
-        join(__dirname, "templates", "python-compiler-deployment.yaml"),
-        "utf8"
-    )
-);
 
 const VALID_SUBPROTOCOLS = ["v4", "v3", "v2", "v1"].map(
     (v) => `${v}.channel.k8s.io`
@@ -34,14 +24,6 @@ export class KubernetesClient {
                 rejectUnauthorized: false,
             }),
         });
-    }
-
-    getUrl() {
-        return this.config.url;
-    }
-
-    getToken() {
-        return this.config.token;
     }
 
     async getDeployment(namespace: string, name: string) {
@@ -98,56 +80,17 @@ export class KubernetesClient {
         );
         return pods.data.items;
     }
-}
 
-export class PythonCompilerClient {
-    constructor(private kubernetesClient: KubernetesClient) { }
-
-    // need to find a better place to store this
-    async initialize() {
-        await this.kubernetesClient.createDeployment(
-            "default",
-            PYTHON_COMPILER_DEPLOYMENT
-        );
-    }
-
-    private async extractPod() {
-        const labelSelector = encodeURIComponent("app=python-compiler");
-
-        const pods = await this.kubernetesClient.getPodsWithLabel(
-            "default",
-            labelSelector
-        );
-
-        const firstPod = pods[0];
-
-        await this.kubernetesClient.removeLabelFromPod(
-            "default",
-            firstPod.metadata.name,
-            "app"
-        );
-
-        return firstPod;
-    }
-
-    async getWsConnection() {
-        const pod = await this.extractPod();
-
-        const podName = pod.metadata?.name!;
-
-        const url = `${this.kubernetesClient.getUrl()}/api/v1/namespaces/default/pods/${podName}/exec?command=python&stdin=true&stdout=true&stderr=true&tty=true`;
+    async getWsConnection(namespace: string, podName: string, cmd: string) {
+        const url = `${this.config.url}/api/v1/namespaces/${namespace}/pods/${podName}/exec?command=${cmd}&stdin=true&stdout=true&stderr=true&tty=true`;
 
         const conn = new WebSocket(url, VALID_SUBPROTOCOLS, {
             rejectUnauthorized: false,
             headers: {
-                Authorization: `Bearer ${this.kubernetesClient.getToken()}`,
+                Authorization: `Bearer ${this.config.token}`,
             },
         });
 
-        return { conn, connId: podName };
-    }
-
-    async cleanup(connId: string) {
-        await this.kubernetesClient.deletePod("default", connId);
+        return { conn, podName };
     }
 }
